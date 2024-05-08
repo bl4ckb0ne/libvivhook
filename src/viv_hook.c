@@ -190,7 +190,11 @@ static void log_queue(flightrec_event_t evctx, uint64_t queue_handle)
  * Assumes that the parent structure id was already added. */
 static void log_interface_in(flightrec_event_t evctx, gcsHAL_INTERFACE *id)
 {
+#ifdef GCABI_SUBCOMMIT
+    struct _gcsHAL_COMMAND_LOCATION *cmdloc;
+#else
     struct _gcoCMDBUF *cmdbuf;
+#endif
 #ifndef GCABI_HAS_STATE_DELTAS
     struct _gcoCONTEXT *context;
 #endif
@@ -201,9 +205,17 @@ static void log_interface_in(flightrec_event_t evctx, gcsHAL_INTERFACE *id)
         assert(id->u.Commit.count == 1);
         id->u.Commit.commandBuffer = id->u.Commit.commandBuffers[0]; /* HACK until dumper can handle multi-commit */
 #endif
+
+#ifdef GCABI_SUBCOMMIT
+        cmdloc = &id->u.Commit.subCommit.commandBuffer;
+        fdr_event_add_oneshot_range(evctx, cmdloc, sizeof(struct _gcsHAL_COMMAND_LOCATION));
+        fdr_event_add_oneshot_range(evctx, cmdloc->address + cmdloc->startOffset, cmdloc->address + cmdloc->size);
+#else
         cmdbuf = VIV_TO_PTR(id->u.Commit.commandBuffer, struct _gcoCMDBUF *);
         fdr_event_add_oneshot_range(evctx, cmdbuf, sizeof(struct _gcoCMDBUF));
         fdr_event_add_oneshot_range(evctx, VIV_TO_PTR(cmdbuf->logical,uint8_t*) + cmdbuf->startOffset, cmdbuf->offset - cmdbuf->startOffset);
+#endif
+
 #ifndef GCABI_HAS_STATE_DELTAS
         context = VIV_TO_PTR(id->u.Commit.contextBuffer, struct _gcoCONTEXT *);
         if (context) {
@@ -214,7 +226,12 @@ static void log_interface_in(flightrec_event_t evctx, gcsHAL_INTERFACE *id)
                 fdr_event_add_oneshot_range(evctx, context->buffer, id->u.Commit.contextBuffer->bufferSize);
         }
 #endif
+
+#ifdef GCABI_SUBCOMMIT
+        log_queue(evctx, id->u.Commit.subCommit.queue);
+#else
         log_queue(evctx, id->u.Commit.queue);
+#endif
         break;
     case gcvHAL_EVENT_COMMIT:
         log_queue(evctx, id->u.Event.queue);
@@ -245,9 +262,11 @@ static void log_interface_in(flightrec_event_t evctx, gcsHAL_INTERFACE *id)
             }
         }
         break;
+#ifndef GCABI_NO_ALLOCATE_CONTIGUOUS_MEMORY
     case gcvHAL_FREE_CONTIGUOUS_MEMORY:
         fdr_remove_monitored_range(_fdr, VIV_TO_PTR(id->u.FreeContiguousMemory.logical, void*), id->u.FreeContiguousMemory.bytes);
         break;
+#endif
     default:
         break;
     }
@@ -288,9 +307,11 @@ static void log_interface_out(flightrec_event_t evctx, gcsHAL_INTERFACE *id)
             }
         }
         break;
+#ifndef GCABI_NO_ALLOCATE_CONTIGUOUS_MEMORY
     case gcvHAL_ALLOCATE_CONTIGUOUS_MEMORY:
         //fdr_add_monitored_range(_fdr, VIV_TO_PTR(id->u.AllocateContiguousMemory.logical, void*), id->u.AllocateContiguousMemory.bytes);
         break;
+#endif
     default:
         break;
     }
